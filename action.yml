@@ -1,0 +1,113 @@
+name: 'Quasar Play Store'
+description: 'Connect your GitHub Action workflow to Play Store'
+author: 'Anant Negi'
+branding:
+  icon: 'airplay'
+  color: 'gray-dark'
+
+inputs:
+  play_store_credentials:
+      description: 'Play Store Credentials'
+      default: ''
+      required: true
+  app_version:
+      description: 'App Version'
+      default: ''
+      required: true
+    package_name:
+      description: 'Package Name'
+      default: ''
+      required: true
+    alias:
+      description: 'Secrets Alias'
+      default: ''
+      required: true
+    key_store_password:
+      description: 'Secrets Key Store Password'
+      default: ''
+      required: true
+    app_track:
+      description: 'App Track'
+      default: 'internal'
+      required: true
+    build_tools_version:
+      description: 'Build Tools Version'
+      default: '33.0.2'
+      required: true
+    node_version:
+      description: 'Node Version'
+      default: '18'
+      required: true
+
+env:
+  APP_VERSION: ""
+  KEYSTORE_BASE64: ""
+runs:
+    using: 'composite'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Generate Base64 Release Key
+        shell: bash
+        run: |
+          #  | tee signing_keystore_base64_encoded.txt
+          # echo "KEYSTORE_BASE64=$(cat signing_keystore_base64_encoded.txt)" >> "$GITHUB_OUTPUT"
+          echo "KEYSTORE_BASE64=$(openssl base64 < ${{ inputs.keystore_file }} | tr -d '\n')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ inputs.node_version }}  # Adjust this to your desired Node.js version
+
+      - name: Append v in APP_VERSION
+        shell: bash
+        run: |
+          echo APP_VERSION="v${{ inputs.app_version }}" >> "$GITHUB_ENV"
+
+      - name: Inputs Print
+        shell: bash
+        run: |
+          echo "Package Name: ${{ inputs.package_name }}"
+          echo "App Version: ${{ env.APP_VERSION }}"
+          echo "Track: ${{ inputs.app_track }}"
+          echo "Bundle Tools Version: ${{ inputs.build_tools_version }}"
+
+      - uses: actions/cache@v3
+        with:
+          key: node-dependencies
+          path: node_modules
+
+      - if: steps.cache-dependencies.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          yarn global add @quasar/cli
+          yarn global add cordova
+          yarn install
+
+      - name: Build Mobile Builder
+        shell: bash
+        run: quasar build -m cordova -T android
+
+      - uses: r0adkll/sign-android-release@v1
+        name: Sign app APK
+        id: sign_app
+        with:
+          releaseDirectory: src-cordova/platforms/android/app/build/outputs/bundle/release
+          signingKeyBase64: ${{ env.KEYSTORE_BASE64 }}
+          alias: ${{ inputs.alias }}
+          keyStorePassword: ${{ inputs.key_store_password }}
+        env:
+          BUILD_TOOLS_VERSION: ${{ inputs.build_tools_version }}
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: $ - $ - $ - App bundle(s) AAB release generated
+          path: $/build/outputs/bundle/release/
+
+      - uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ inputs.play_store_credentials }}
+          track: ${{ inputs.app_track }}
+          packageName: ${{ inputs.package_name }}
+          releaseName: ${{ env.APP_VERSION }}
+          releaseFiles: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          debugSymbols: src-cordova/platforms/android/app/build/intermediates/merged_native_libs/release/out/lib
