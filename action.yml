@@ -71,3 +71,43 @@ runs:
           echo "Track: ${{ inputs.app_track }}"
           echo "Bundle Tools Version: ${{ inputs.build_tools_version }}"
 
+      - uses: actions/cache@v3
+        with:
+          key: node-dependencies
+          path: node_modules
+
+      - if: steps.cache-dependencies.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          yarn global add @quasar/cli
+          yarn global add cordova
+          yarn install
+
+      - name: Build Mobile Builder
+        shell: bash
+        run: quasar build -m cordova -T android
+
+      - uses: r0adkll/sign-android-release@v1
+        name: Sign app APK
+        id: sign_app
+        with:
+          releaseDirectory: src-cordova/platforms/android/app/build/outputs/bundle/release
+          signingKeyBase64: ${{ env.KEYSTORE_BASE64 }}
+          alias: ${{ inputs.alias }}
+          keyStorePassword: ${{ inputs.key_store_password }}
+        env:
+          BUILD_TOOLS_VERSION: ${{ inputs.build_tools_version }}
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: $ - $ - $ - App bundle(s) AAB release generated
+          path: $/build/outputs/bundle/release/
+
+      - uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ inputs.play_store_credentials }}
+          track: ${{ inputs.app_track }}
+          packageName: ${{ inputs.package_name }}
+          releaseName: ${{ env.APP_VERSION }}
+          releaseFiles: ${{ steps.sign_app.outputs.signedReleaseFile }}
+          debugSymbols: src-cordova/platforms/android/app/build/intermediates/merged_native_libs/release/out/lib
